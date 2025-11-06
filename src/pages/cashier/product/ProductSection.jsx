@@ -1,7 +1,11 @@
+// FULL UPDATED ProductSection WITH 10-DIGIT SCAN MODE
+import { Search, Barcode, Loader2, X, Scale } from "lucide-react";
+
+
 import React, { useCallback, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Barcode, Loader2, X } from "lucide-react";
+
 import { useToast } from "@/components/ui/use-toast";
 import ProductCard from "./ProductCard";
 import { useDispatch, useSelector } from "react-redux";
@@ -26,6 +30,7 @@ const ProductSection = ({ searchInputRef }) => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isBarcodeMode, setIsBarcodeMode] = useState(false);
+  const [isTenDigitMode, setIsTenDigitMode] = useState(false);
 
   const filterProductsByInventory = (productList) => {
     if (!inventories || inventories.length === 0) return productList;
@@ -117,7 +122,6 @@ const ProductSection = ({ searchInputRef }) => {
     return { canParseAsScale: false, productCode: cleanBarcode, weight: null };
   };
 
-  // ✅ Updated: Exact SKU/barcode match
   const handleBarcodeSearch = useCallback(
     async (barcode) => {
       if (!barcode.trim() || !branch?.storeId || !localStorage.getItem("jwt"))
@@ -137,7 +141,6 @@ const ProductSection = ({ searchInputRef }) => {
           toast({
             title: "Added to cart",
             description: `${exactMatch.name} (1 unit) added to cart`,
-            duration: 1500,
           });
           setSearchTerm("");
           dispatch(clearSearchResults());
@@ -168,7 +171,6 @@ const ProductSection = ({ searchInputRef }) => {
               description: `${exactScaleMatch.name} (${parsed.weight.toFixed(
                 3
               )} kg) added to cart`,
-              duration: 2000,
             });
           } else {
             toast({
@@ -201,6 +203,58 @@ const ProductSection = ({ searchInputRef }) => {
     [dispatch, branch, toast, searchInputRef]
   );
 
+  const handleTenDigitBarcode = useCallback(
+    async (barcode) => {
+      const clean = barcode.trim();
+      if (clean.length !== 10 || !/^\d+$/.test(clean)) {
+        toast({
+          title: "Invalid Barcode",
+          description: "Scale  barcode required",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const sku = clean.substring(0, 4);
+
+      try {
+        const results = await dispatch(
+          searchProducts({ query: sku, storeId: branch.storeId })
+        ).unwrap();
+
+        const exact = results.find(
+          (p) => p.sku === sku || p.barcode === sku
+        );
+
+        if (exact) {
+          dispatch(addToCart(exact));
+          toast({
+            title: "Added to cart",
+            description: `${exact.name} added to cart`,
+          });
+        } else {
+          toast({
+            title: "Not Found",
+            description: `No product found for SKU ${sku}`,
+            variant: "destructive",
+          });
+        }
+
+        setSearchTerm("");
+        dispatch(clearSearchResults());
+        searchInputRef?.current?.focus();
+      } catch (error) {
+        console.error("Scale barcode search failed:", error);
+        toast({
+          title: "Error",
+          description: "Failed to search product",
+          variant: "destructive",
+        });
+      }
+    },
+    [dispatch, branch, toast, searchInputRef]
+  );
+
   const debouncedSearch = useCallback(
     (() => {
       let timeoutId;
@@ -227,29 +281,20 @@ const ProductSection = ({ searchInputRef }) => {
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
-    if (!isBarcodeMode) {
+    if (!isBarcodeMode && !isTenDigitMode) {
       if (e.target.value.trim()) debouncedSearch(e.target.value);
       else dispatch(clearSearchResults());
     }
   };
 
   const handleKeyPress = (e) => {
-    if (e.key === "Enter" && isBarcodeMode && searchTerm.trim()) {
-      handleBarcodeSearch(searchTerm);
+    if (e.key === "Enter" && searchTerm.trim()) {
+      if (isBarcodeMode) {
+        handleBarcodeSearch(searchTerm);
+      } else if (isTenDigitMode) {
+        handleTenDigitBarcode(searchTerm);
+      }
     }
-  };
-
-  const toggleBarcodeMode = () => {
-    setIsBarcodeMode(!isBarcodeMode);
-    setSearchTerm("");
-    dispatch(clearSearchResults());
-    toast({
-      title: isBarcodeMode ? "Barcode Mode Disabled" : "Barcode Mode Enabled",
-      description: isBarcodeMode
-        ? "Normal search mode activated"
-        : "Scan product or scale barcode and press Enter",
-    });
-    searchInputRef?.current?.focus();
   };
 
   useEffect(() => {
@@ -273,10 +318,14 @@ const ProductSection = ({ searchInputRef }) => {
             placeholder={
               isBarcodeMode
                 ? "Scan barcode and press Enter..."
+                : isTenDigitMode
+                ? "Scan Scale barcode and press Enter..."
                 : "Search products or scan barcode (F1)"
             }
             className={`pl-10 pr-4 py-3 text-lg ${
-              isBarcodeMode ? "border-green-500 focus:border-green-600" : ""
+              isBarcodeMode || isTenDigitMode
+                ? "border-green-500 focus:border-green-600"
+                : ""
             }`}
             value={searchTerm}
             onChange={handleSearchChange}
@@ -292,7 +341,7 @@ const ProductSection = ({ searchInputRef }) => {
               : `${getDisplayProducts().length} products available in inventory`}
           </span>
           <div className="flex gap-2">
-            {searchTerm.trim() && !isBarcodeMode && (
+            {searchTerm.trim() && !isBarcodeMode && !isTenDigitMode && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -306,16 +355,54 @@ const ProductSection = ({ searchInputRef }) => {
                 <X className="w-4 h-4 mr-1" /> Clear
               </Button>
             )}
+
             <Button
               variant={isBarcodeMode ? "default" : "outline"}
               size="sm"
               className="text-xs"
-              onClick={toggleBarcodeMode}
+              onClick={() => {
+                setIsBarcodeMode(!isBarcodeMode);
+                setIsTenDigitMode(false);
+                setSearchTerm("");
+                dispatch(clearSearchResults());
+                toast({
+                  title: isBarcodeMode
+                    ? "Barcode Mode Disabled"
+                    : "Barcode Mode Enabled",
+                  description: "Scan product and press Enter",
+                });
+                searchInputRef?.current?.focus();
+              }}
               disabled={loading}
             >
               <Barcode className="w-4 h-4 mr-1" />
               {isBarcodeMode ? "Scanning..." : "Scan Mode"}
             </Button>
+
+         <Button
+  variant={isTenDigitMode ? "default" : "outline"}
+  size="sm"
+  className="text-xs"
+  onClick={() => {
+    setIsTenDigitMode(!isTenDigitMode);
+    setIsBarcodeMode(false);
+    setSearchTerm("");
+    dispatch(clearSearchResults());
+    toast({
+      title: isTenDigitMode
+        ? "Scale barcode Scan Disabled"
+        : "Scale barcode Scan Enabled",
+      description: "Scan Scale barcode and press Enter",
+    });
+    searchInputRef?.current?.focus();
+  }}
+  disabled={loading}
+>
+  <Scale className="w-4 h-4 mr-1" />
+  {isTenDigitMode ? "Scanning..." : "Scale barcode"}
+</Button>
+
+
           </div>
         </div>
       </div>
