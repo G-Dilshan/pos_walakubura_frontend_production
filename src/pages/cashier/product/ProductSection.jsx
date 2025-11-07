@@ -1,4 +1,4 @@
-// FULL UPDATED ProductSection WITH PREFIX NAME FILTER + 10-DIGIT SCAN MODE + AUTO EXIT SCAN MODE
+// FULL UPDATED ProductSection WITH PREFIX NAME FILTER + 9-DIGIT SCALE MODE + 10-DIGIT AUTO-CONVERT + AUTO EXIT SCAN MODE
 import { Search, Barcode, Loader2, X, Scale } from "lucide-react";
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -39,14 +39,13 @@ const ProductSection = ({ searchInputRef }) => {
     return productList.filter((p) => inventoryProductIds.includes(p.id));
   };
 
-  // ✅ UPDATED with prefix filtering
+  // ✅ PREFIX SEARCH
   const getDisplayProducts = () => {
     let baseList =
       searchTerm.trim() && searchResults.length > 0
         ? searchResults
         : products || [];
 
-    // ✅ PREFIX SEARCH APPLIED ONLY IN NORMAL SEARCH MODE
     if (searchTerm.trim() && !isBarcodeMode && !isTenDigitMode) {
       baseList = baseList.filter((p) =>
         (p.name || "").toLowerCase().startsWith(searchTerm.toLowerCase())
@@ -67,7 +66,6 @@ const ProductSection = ({ searchInputRef }) => {
           await dispatch(getProductsByStore(branch.storeId)).unwrap();
           await dispatch(getInventoryByBranch(branch.id)).unwrap();
         } catch (error) {
-          console.error("Fetch failed:", error);
           toast({
             title: "Error",
             description: error || "Failed to fetch data",
@@ -87,7 +85,6 @@ const ProductSection = ({ searchInputRef }) => {
             })
           ).unwrap();
         } catch (error) {
-          console.error("Failed to fetch branch:", error);
           toast({
             title: "Error",
             description: "Failed to load branch information",
@@ -106,34 +103,38 @@ const ProductSection = ({ searchInputRef }) => {
         .then(() => {
           toast({
             title: "Inventory Updated",
-            description: "Stock levels refreshed after payment.",
+            description: "Stock levels refreshed.",
           });
         })
         .catch((error) => console.error("Failed to refresh inventory:", error));
     }
   }, [paymentSuccess, branch, dispatch, toast]);
 
+  // ✅ UPDATED SCALE PARSER (9-digit & 10-digit → last 5 digits = quantity / 1000)
   const parseScaleBarcode = (barcode) => {
-    const cleanBarcode = barcode.trim();
-    if (cleanBarcode.length === 10 && /^\d+$/.test(cleanBarcode)) {
-      const productCode = cleanBarcode.substring(0, 5);
-      const weightValue = cleanBarcode.substring(5);
-      const weight = parseInt(weightValue) / 1000;
-      if (weight > 0 && weight < 100) {
-        return { canParseAsScale: true, productCode, weight };
+    let clean = barcode.trim();
+
+    // ✅ 10-digit → remove 1st digit → becomes 9-digit
+    if (clean.length === 10 && /^\d+$/.test(clean)) {
+      clean = clean.substring(1);
+    }
+
+    // ✅ EXPECT 9-digit
+    if (clean.length === 9 && /^\d+$/.test(clean)) {
+      const productCode = clean.substring(0, 4);
+      const qtyDigits = clean.substring(4);
+
+      const quantity = parseInt(qtyDigits) / 1000; // ✅ 12345 → 12.345
+
+      if (quantity > 0) {
+        return { canParseAsScale: true, productCode, quantity };
       }
     }
-    if (cleanBarcode.length === 13 && cleanBarcode.startsWith("2")) {
-      const productCode = cleanBarcode.substring(2, 7);
-      const weightValue = cleanBarcode.substring(7, 12);
-      const weight = parseInt(weightValue) / 1000;
-      if (weight > 0 && weight < 100) {
-        return { canParseAsScale: true, productCode, weight };
-      }
-    }
-    return { canParseAsScale: false, productCode: cleanBarcode, weight: null };
+
+    return { canParseAsScale: false, productCode: null, quantity: null };
   };
 
+  // ✅ BARCODE SCANNING
   const handleBarcodeSearch = useCallback(
     async (barcode) => {
       if (!barcode.trim() || !branch?.storeId || !localStorage.getItem("jwt"))
@@ -148,11 +149,12 @@ const ProductSection = ({ searchInputRef }) => {
           (p) => p.sku === barcode.trim() || p.barcode === barcode.trim()
         );
 
+        // ✅ EXACT NORMAL BARCODE MATCH
         if (exactMatch) {
           dispatch(addToCart(exactMatch));
           toast({
             title: "Added to cart",
-            description: `${exactMatch.name} (1 unit) added to cart`,
+            description: `${exactMatch.name} added`,
           });
           setSearchTerm("");
           dispatch(clearSearchResults());
@@ -160,7 +162,9 @@ const ProductSection = ({ searchInputRef }) => {
           return;
         }
 
+        // ✅ SCALE PARSER (9/10-digit)
         const parsed = parseScaleBarcode(barcode);
+
         if (parsed.canParseAsScale) {
           const scaleResults = await dispatch(
             searchProducts({
@@ -171,95 +175,42 @@ const ProductSection = ({ searchInputRef }) => {
 
           const exactScaleMatch = scaleResults.find(
             (p) =>
-              p.sku === parsed.productCode ||
-              p.barcode === parsed.productCode
+              p.sku === parsed.productCode || p.barcode === parsed.productCode
           );
 
           if (exactScaleMatch) {
-            const productWithWeight = {
+            const productWithQty = {
               ...exactScaleMatch,
-              scannedWeight: parsed.weight,
-              quantity: parsed.weight,
+              quantity: parsed.quantity,
               isWeightedItem: true,
             };
-            dispatch(addToCart(productWithWeight));
+
+            dispatch(addToCart(productWithQty));
+
             toast({
               title: "Added to cart",
-              description: `${exactScaleMatch.name} (${parsed.weight.toFixed(
+              description: `${exactScaleMatch.name} (${parsed.quantity.toFixed(
                 3
-              )} kg) added to cart`,
+              )}) added`,
             });
           } else {
             toast({
               title: "Product Not Found",
-              description: `No product found with code: ${parsed.productCode}`,
+              description: `No product with code: ${parsed.productCode}`,
               variant: "destructive",
             });
           }
         } else {
           toast({
-            title: "Product Not Found",
-            description: "No product found with this barcode",
-            variant: "destructive",
-          });
-        }
-
-        setSearchTerm("");
-        dispatch(clearSearchResults());
-      } catch (error) {
-        console.error("Barcode search failed:", error);
-        toast({
-          title: "Search Error",
-          description: error || "Failed to search product",
-          variant: "destructive",
-        });
-        setSearchTerm("");
-        dispatch(clearSearchResults());
-      }
-    },
-    [dispatch, branch, toast, searchInputRef]
-  );
-
-  const handleTenDigitBarcode = useCallback(
-    async (barcode) => {
-      const clean = barcode.trim();
-      if (clean.length !== 10 || !/^\d+$/.test(clean)) {
-        toast({
-          title: "Invalid Barcode",
-          description: "Scale barcode required",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const sku = clean.substring(0, 4);
-
-      try {
-        const results = await dispatch(
-          searchProducts({ query: sku, storeId: branch.storeId })
-        ).unwrap();
-
-        const exact = results.find((p) => p.sku === sku || p.barcode === sku);
-
-        if (exact) {
-          dispatch(addToCart(exact));
-          toast({
-            title: "Added to cart",
-            description: `${exact.name} added to cart`,
-          });
-        } else {
-          toast({
             title: "Not Found",
-            description: `No product found for SKU ${sku}`,
+            description: "Invalid scale barcode",
             variant: "destructive",
           });
         }
 
         setSearchTerm("");
         dispatch(clearSearchResults());
-        searchInputRef?.current?.focus();
       } catch (error) {
-        console.error("Scale barcode search failed:", error);
         toast({
           title: "Error",
           description: "Failed to search product",
@@ -270,6 +221,77 @@ const ProductSection = ({ searchInputRef }) => {
     [dispatch, branch, toast, searchInputRef]
   );
 
+  // ✅ SCALE MODE HANDLER
+  const handleTenDigitBarcode = useCallback(
+    async (barcode) => {
+      let clean = barcode.trim();
+
+      // ✅ Allow 10-digit → convert to 9-digit
+      if (clean.length === 10 && /^\d+$/.test(clean)) {
+        clean = clean.substring(1);
+      }
+
+      if (clean.length !== 9 || !/^\d+$/.test(clean)) {
+        toast({
+          title: "Invalid Scale Barcode",
+          description: "9-digit or 10-digit required",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const productCode = clean.substring(0, 4);
+      const qtyDigits = clean.substring(4);
+      const quantity = parseInt(qtyDigits) / 1000;
+
+      try {
+        const results = await dispatch(
+          searchProducts({
+            query: productCode,
+            storeId: branch.storeId,
+          })
+        ).unwrap();
+
+        const exact = results.find(
+          (p) => p.sku === productCode || p.barcode === productCode
+        );
+
+        if (exact) {
+          dispatch(
+            addToCart({
+              ...exact,
+              quantity,
+              isWeightedItem: true,
+            })
+          );
+
+          toast({
+            title: "Added",
+            description: `${exact.name} (${quantity}) added`,
+          });
+        } else {
+          toast({
+            title: "Not Found",
+            description: `No product for SKU ${productCode}`,
+            variant: "destructive",
+          });
+        }
+
+        setSearchTerm("");
+        dispatch(clearSearchResults());
+        searchInputRef?.current?.focus();
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to search product",
+          variant: "destructive",
+        });
+      }
+    },
+    [dispatch, branch, toast, searchInputRef]
+  );
+
+  // ✅ DEBOUNCED SEARCH
   const debouncedSearch = useCallback(
     (() => {
       let timeoutId;
@@ -280,10 +302,9 @@ const ProductSection = ({ searchInputRef }) => {
             dispatch(
               searchProducts({ query: query.trim(), storeId: branch.storeId })
             ).catch((error) => {
-              console.error("Search failed:", error);
               toast({
                 title: "Search Error",
-                description: error || "Failed to search products",
+                description: error || "Failed",
                 variant: "destructive",
               });
             });
@@ -294,7 +315,7 @@ const ProductSection = ({ searchInputRef }) => {
     [dispatch, branch, toast]
   );
 
-  // ✅ AUTO EXIT SCAN MODE WHEN NORMAL TYPING
+  // ✅ AUTO EXIT SCAN MODE WHEN TYPING LETTERS
   const handleSearchChange = (e) => {
     const value = e.target.value;
 
@@ -303,8 +324,8 @@ const ProductSection = ({ searchInputRef }) => {
         setIsBarcodeMode(false);
         setIsTenDigitMode(false);
         toast({
-          title: "Scanner Mode Disabled",
-          description: "Typing detected. Switched to normal search.",
+          title: "Scan Disabled",
+          description: "Typing detected.",
         });
       }
     }
@@ -346,7 +367,7 @@ const ProductSection = ({ searchInputRef }) => {
               isBarcodeMode
                 ? "Scan barcode and press Enter..."
                 : isTenDigitMode
-                ? "Scan Scale barcode and press Enter..."
+                ? "Scan 9/10-digit scale barcode..."
                 : "Search products or scan barcode (F1)"
             }
             className={`pl-10 pr-4 py-3 text-lg ${
@@ -365,7 +386,7 @@ const ProductSection = ({ searchInputRef }) => {
           <span className="text-sm text-muted-foreground">
             {loading
               ? "Loading products..."
-              : `${getDisplayProducts().length} products available in inventory`}
+              : `${getDisplayProducts().length} items`}
           </span>
           <div className="flex gap-2">
             {searchTerm.trim() && !isBarcodeMode && !isTenDigitMode && (
@@ -394,13 +415,11 @@ const ProductSection = ({ searchInputRef }) => {
                 dispatch(clearSearchResults());
                 toast({
                   title: isBarcodeMode
-                    ? "Barcode Mode Disabled"
-                    : "Barcode Mode Enabled",
-                  description: "Scan product and press Enter",
+                    ? "Barcode Mode Off"
+                    : "Barcode Mode On",
                 });
                 searchInputRef?.current?.focus();
               }}
-              disabled={loading}
             >
               <Barcode className="w-4 h-4 mr-1" />
               {isBarcodeMode ? "Scanning..." : "Scan Mode"}
@@ -417,13 +436,12 @@ const ProductSection = ({ searchInputRef }) => {
                 dispatch(clearSearchResults());
                 toast({
                   title: isTenDigitMode
-                    ? "Scale barcode Scan Disabled"
-                    : "Scale barcode Scan Enabled",
-                  description: "Scan Scale barcode and press Enter",
+                    ? "Scale Mode Off"
+                    : "Scale Mode On",
+                  description: "Scan 9/10-digit barcode",
                 });
                 searchInputRef?.current?.focus();
               }}
-              disabled={loading}
             >
               <Scale className="w-4 h-4 mr-1" />
               {isTenDigitMode ? "Scanning..." : "Scale barcode"}
@@ -437,7 +455,7 @@ const ProductSection = ({ searchInputRef }) => {
           <div className="flex items-center justify-center h-64">
             <div className="flex flex-col items-center space-y-4">
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground">Loading products...</p>
+              <p className="text-muted-foreground">Loading...</p>
             </div>
           </div>
         ) : getDisplayProducts().length === 0 ? (
@@ -446,8 +464,8 @@ const ProductSection = ({ searchInputRef }) => {
               <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500">
                 {searchTerm
-                  ? "No products found matching your search"
-                  : "No products found in inventory"}
+                  ? "No products found"
+                  : "No products in inventory"}
               </p>
             </div>
           </div>
