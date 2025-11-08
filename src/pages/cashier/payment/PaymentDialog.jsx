@@ -49,6 +49,7 @@ const PaymentDialog = ({
   const dispatch = useDispatch();
   const buttonRefs = useRef([]);
 
+  // Validate order before sending
   const validateOrder = () => {
     if (cart.length === 0) {
       toast({
@@ -58,16 +59,14 @@ const PaymentDialog = ({
       });
       return false;
     }
-
     if (!selectedCustomer) {
       toast({
         title: "Customer Required",
-        description: "Please select a customer before proceeding",
+        description: "Please select a customer",
         variant: "destructive",
       });
       return false;
     }
-
     if (!paymentMethod) {
       toast({
         title: "Payment Method Required",
@@ -76,15 +75,15 @@ const PaymentDialog = ({
       });
       return false;
     }
-
     return true;
   };
 
+  // Process payment
   const processPayment = async () => {
     if (!validateOrder()) return;
 
     const orderData = {
-      tempId: uuidv4(),
+      idempotencyKey: uuidv4(), // unique key for idempotency
       totalAmount: total,
       branchId: branch.id,
       cashierId: userProfile.id,
@@ -113,7 +112,7 @@ const PaymentDialog = ({
     } catch (error) {
       toast({
         title: "Order Creation Failed",
-        description: error?.message || "Please try again.",
+        description: error?.message || "Please try again",
         variant: "destructive",
       });
     } finally {
@@ -129,15 +128,12 @@ const PaymentDialog = ({
     }
   }, [showPaymentDialog, dispatch]);
 
-  // Keyboard navigation with Enter-delay fix
+  // Keyboard navigation
   useEffect(() => {
     if (!showPaymentDialog) return;
 
     let enableKeys = false;
-
-    const timer = setTimeout(() => {
-      enableKeys = true;
-    }, 300); // delay to prevent instant Enter trigger
+    const timer = setTimeout(() => (enableKeys = true), 300);
 
     const handleKeyDown = (e) => {
       if (!enableKeys || isProcessing) return;
@@ -154,11 +150,8 @@ const PaymentDialog = ({
 
         case "ArrowUp":
           e.preventDefault();
-          setFocusedIndex((prev) => {
-            const newIndex = prev === 0 ? paymentMethods.length - 1 : prev - 1;
-            dispatch(setPaymentMethod(paymentMethods[newIndex].key));
-            return newIndex;
-          });
+          setFocusedIndex((prev) => (prev === 0 ? paymentMethods.length - 1 : prev - 1));
+          dispatch(setPaymentMethod(paymentMethods[focusedIndex].key));
           break;
 
         case "Enter":
@@ -177,13 +170,13 @@ const PaymentDialog = ({
     };
 
     window.addEventListener("keydown", handleKeyDown);
-
     return () => {
       clearTimeout(timer);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [showPaymentDialog, isProcessing, focusedIndex, paymentMethod, cart, selectedCustomer]);
+  }, [showPaymentDialog, isProcessing, focusedIndex, paymentMethod]);
 
+  // Focus button when navigating
   useEffect(() => {
     if (buttonRefs.current[focusedIndex] && showPaymentDialog) {
       buttonRefs.current[focusedIndex]?.focus();
@@ -208,16 +201,13 @@ const PaymentDialog = ({
 
         <div className="space-y-6">
           <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-            <div className="text-4xl font-bold text-green-600">
-              Rs. {total.toFixed(2)}
-            </div>
+            <div className="text-4xl font-bold text-green-600">Rs. {total.toFixed(2)}</div>
             <p className="text-sm text-gray-600 mt-1">Total Amount</p>
           </div>
 
           {selectedCustomer && (
             <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded-lg">
-              <span className="font-medium">Customer:</span>{" "}
-              {selectedCustomer.name || selectedCustomer.email}
+              <span className="font-medium">Customer:</span> {selectedCustomer.name || selectedCustomer.email}
             </div>
           )}
 
@@ -245,9 +235,7 @@ const PaymentDialog = ({
                   {Icon && <Icon className="h-5 w-5" />}
                   <span>{method.label}</span>
                   {isSelected && (
-                    <span className="ml-auto text-xs bg-white/20 px-2 py-1 rounded">
-                      Selected
-                    </span>
+                    <span className="ml-auto text-xs bg-white/20 px-2 py-1 rounded">Selected</span>
                   )}
                 </Button>
               );
@@ -260,8 +248,7 @@ const PaymentDialog = ({
               complete payment
             </p>
             <p>
-              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to
-              cancel
+              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to cancel
             </p>
           </div>
         </div>
@@ -270,11 +257,7 @@ const PaymentDialog = ({
           <Button variant="outline" onClick={handleCancel} disabled={isProcessing}>
             Cancel (Esc)
           </Button>
-          <Button
-            onClick={processPayment}
-            disabled={isProcessing || !paymentMethod}
-            className="gap-2"
-          >
+          <Button onClick={processPayment} disabled={isProcessing || !paymentMethod} className="gap-2">
             {isProcessing ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" /> Processing...
