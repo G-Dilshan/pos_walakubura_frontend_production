@@ -36,6 +36,7 @@ const PaymentDialog = ({
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [idempotencyKey, setIdempotencyKey] = useState(null); // ✅ FIXED
 
   const paymentMethod = useSelector(selectPaymentMethod);
   const cart = useSelector(selectCartItems);
@@ -49,7 +50,16 @@ const PaymentDialog = ({
   const dispatch = useDispatch();
   const buttonRefs = useRef([]);
 
-  // Validate order before sending
+  // ✅ Generate idempotency key ONCE per order (Fix duplicate)
+  useEffect(() => {
+    if (showPaymentDialog) {
+      setIdempotencyKey(uuidv4());
+      dispatch(setPaymentMethod("CASH"));
+      setFocusedIndex(0);
+    }
+  }, [showPaymentDialog, dispatch]);
+
+  // ✅ Validation
   const validateOrder = () => {
     if (cart.length === 0) {
       toast({
@@ -78,12 +88,18 @@ const PaymentDialog = ({
     return true;
   };
 
-  // Process payment
+  // ✅ ABSOLUTE duplicate prevention
   const processPayment = async () => {
-    if (!validateOrder()) return;
+    if (isProcessing) return; // ✅ HARD LOCK
+    setIsProcessing(true);
+
+    if (!validateOrder()) {
+      setIsProcessing(false);
+      return;
+    }
 
     const orderData = {
-      idempotencyKey: uuidv4(), // unique key for idempotency
+      idempotencyKey, // ✅ ALWAYS the same for this dialog session
       totalAmount: total,
       branchId: branch.id,
       cashierId: userProfile.id,
@@ -98,15 +114,16 @@ const PaymentDialog = ({
       note: note || "",
     };
 
-    setIsProcessing(true);
-
     try {
       const createdOrder = await dispatch(createOrder(orderData)).unwrap();
+
       dispatch(setCurrentOrder(createdOrder));
+
       toast({
         title: "Order Created Successfully",
         description: `Order #${createdOrder.id} created.`,
       });
+
       setShowPaymentDialog(false);
       setShowReceiptDialog(true);
     } catch (error) {
@@ -120,23 +137,12 @@ const PaymentDialog = ({
     }
   };
 
-  // Auto-select CASH on dialog open
-  useEffect(() => {
-    if (showPaymentDialog) {
-      dispatch(setPaymentMethod("CASH"));
-      setFocusedIndex(0);
-    }
-  }, [showPaymentDialog, dispatch]);
-
-  // Keyboard navigation
+  // ✅ Keyboard navigation WITHOUT triggering double orders
   useEffect(() => {
     if (!showPaymentDialog) return;
 
-    let enableKeys = false;
-    const timer = setTimeout(() => (enableKeys = true), 300);
-
     const handleKeyDown = (e) => {
-      if (!enableKeys || isProcessing) return;
+      if (isProcessing) return;
 
       switch (e.key) {
         case "ArrowDown":
@@ -150,18 +156,20 @@ const PaymentDialog = ({
 
         case "ArrowUp":
           e.preventDefault();
-          setFocusedIndex((prev) => (prev === 0 ? paymentMethods.length - 1 : prev - 1));
+          setFocusedIndex((prev) =>
+            prev === 0 ? paymentMethods.length - 1 : prev - 1
+          );
           dispatch(setPaymentMethod(paymentMethods[focusedIndex].key));
           break;
 
         case "Enter":
           e.preventDefault();
-          if (!isProcessing) processPayment();
+          processPayment(); // ✅ Only this triggers
           break;
 
         case "Escape":
           e.preventDefault();
-          handleCancel();
+          if (!isProcessing) setShowPaymentDialog(false);
           break;
 
         default:
@@ -170,13 +178,10 @@ const PaymentDialog = ({
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showPaymentDialog, isProcessing, focusedIndex, paymentMethod]);
 
-  // Focus button when navigating
+  // ✅ Focus movement
   useEffect(() => {
     if (buttonRefs.current[focusedIndex] && showPaymentDialog) {
       buttonRefs.current[focusedIndex]?.focus();
@@ -184,6 +189,7 @@ const PaymentDialog = ({
   }, [focusedIndex, showPaymentDialog]);
 
   const handlePaymentMethod = (method, index) => {
+    if (isProcessing) return;
     dispatch(setPaymentMethod(method));
     setFocusedIndex(index);
   };
@@ -201,13 +207,16 @@ const PaymentDialog = ({
 
         <div className="space-y-6">
           <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-            <div className="text-4xl font-bold text-green-600">Rs. {total.toFixed(2)}</div>
+            <div className="text-4xl font-bold text-green-600">
+              Rs. {total.toFixed(2)}
+            </div>
             <p className="text-sm text-gray-600 mt-1">Total Amount</p>
           </div>
 
           {selectedCustomer && (
             <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded-lg">
-              <span className="font-medium">Customer:</span> {selectedCustomer.name || selectedCustomer.email}
+              <span className="font-medium">Customer:</span>{" "}
+              {selectedCustomer.name || selectedCustomer.email}
             </div>
           )}
 
@@ -235,7 +244,9 @@ const PaymentDialog = ({
                   {Icon && <Icon className="h-5 w-5" />}
                   <span>{method.label}</span>
                   {isSelected && (
-                    <span className="ml-auto text-xs bg-white/20 px-2 py-1 rounded">Selected</span>
+                    <span className="ml-auto text-xs bg-white/20 px-2 py-1 rounded">
+                      Selected
+                    </span>
                   )}
                 </Button>
               );
@@ -244,11 +255,13 @@ const PaymentDialog = ({
 
           <div className="text-xs text-gray-500 text-center space-y-1">
             <p>
-              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Enter</kbd> to
-              complete payment
+              Press{" "}
+              <kbd className="px-2 py-1 bg-gray-100 rounded">Enter</kbd> to complete
+              payment
             </p>
             <p>
-              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to cancel
+              Press{" "}
+              <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to cancel
             </p>
           </div>
         </div>
@@ -257,7 +270,11 @@ const PaymentDialog = ({
           <Button variant="outline" onClick={handleCancel} disabled={isProcessing}>
             Cancel (Esc)
           </Button>
-          <Button onClick={processPayment} disabled={isProcessing || !paymentMethod} className="gap-2">
+          <Button
+            onClick={processPayment}
+            disabled={isProcessing || !paymentMethod}
+            className="gap-2"
+          >
             {isProcessing ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" /> Processing...
