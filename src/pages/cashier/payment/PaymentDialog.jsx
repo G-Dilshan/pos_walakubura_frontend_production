@@ -36,7 +36,7 @@ const PaymentDialog = ({
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(0);
-  const [idempotencyKey, setIdempotencyKey] = useState(null); // ✅ FIXED
+  const [idempotencyKey, setIdempotencyKey] = useState(null);
 
   const paymentMethod = useSelector(selectPaymentMethod);
   const cart = useSelector(selectCartItems);
@@ -50,14 +50,14 @@ const PaymentDialog = ({
   const dispatch = useDispatch();
   const buttonRefs = useRef([]);
 
-  // ✅ Generate idempotency key ONCE per order (Fix duplicate)
+  // ✅ Generate idempotency key ONCE per dialog open
   useEffect(() => {
-    if (showPaymentDialog) {
+    if (showPaymentDialog && !idempotencyKey) {
       setIdempotencyKey(uuidv4());
       dispatch(setPaymentMethod("CASH"));
       setFocusedIndex(0);
     }
-  }, [showPaymentDialog, dispatch]);
+  }, [showPaymentDialog, idempotencyKey, dispatch]);
 
   // ✅ Validation
   const validateOrder = () => {
@@ -90,7 +90,7 @@ const PaymentDialog = ({
 
   // ✅ ABSOLUTE duplicate prevention
   const processPayment = async () => {
-    if (isProcessing) return; // ✅ HARD LOCK
+    if (isProcessing) return;
     setIsProcessing(true);
 
     if (!validateOrder()) {
@@ -99,7 +99,7 @@ const PaymentDialog = ({
     }
 
     const orderData = {
-      idempotencyKey, // ✅ ALWAYS the same for this dialog session
+      idempotencyKey,
       totalAmount: total,
       branchId: branch.id,
       cashierId: userProfile.id,
@@ -123,6 +123,9 @@ const PaymentDialog = ({
         title: "Order Created Successfully",
         description: `Order #${createdOrder.id} created.`,
       });
+
+      // ✅ Reset idempotency key for next order
+      setIdempotencyKey(null);
 
       setShowPaymentDialog(false);
       setShowReceiptDialog(true);
@@ -164,12 +167,15 @@ const PaymentDialog = ({
 
         case "Enter":
           e.preventDefault();
-          processPayment(); // ✅ Only this triggers
+          processPayment();
           break;
 
         case "Escape":
           e.preventDefault();
-          if (!isProcessing) setShowPaymentDialog(false);
+          if (!isProcessing) {
+            setIdempotencyKey(null); // ✅ Reset key when closing
+            setShowPaymentDialog(false);
+          }
           break;
 
         default:
@@ -181,7 +187,7 @@ const PaymentDialog = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showPaymentDialog, isProcessing, focusedIndex, paymentMethod]);
 
-  // ✅ Focus movement
+  // ✅ Auto focus movement
   useEffect(() => {
     if (buttonRefs.current[focusedIndex] && showPaymentDialog) {
       buttonRefs.current[focusedIndex]?.focus();
@@ -195,7 +201,10 @@ const PaymentDialog = ({
   };
 
   const handleCancel = () => {
-    if (!isProcessing) setShowPaymentDialog(false);
+    if (!isProcessing) {
+      setIdempotencyKey(null); // ✅ Reset key on cancel
+      setShowPaymentDialog(false);
+    }
   };
 
   return (
@@ -255,13 +264,12 @@ const PaymentDialog = ({
 
           <div className="text-xs text-gray-500 text-center space-y-1">
             <p>
-              Press{" "}
-              <kbd className="px-2 py-1 bg-gray-100 rounded">Enter</kbd> to complete
-              payment
+              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Enter</kbd> to
+              complete payment
             </p>
             <p>
-              Press{" "}
-              <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to cancel
+              Press <kbd className="px-2 py-1 bg-gray-100 rounded">Esc</kbd> to
+              cancel
             </p>
           </div>
         </div>
