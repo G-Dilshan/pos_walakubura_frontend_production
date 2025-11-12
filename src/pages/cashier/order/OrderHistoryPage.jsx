@@ -1,19 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-
 import { useToast } from "@/components/ui/use-toast";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
-
 import {
   SearchIcon,
   PrinterIcon,
@@ -24,7 +20,6 @@ import {
 } from "lucide-react";
 import { getOrdersByCashier } from "@/Redux Toolkit/features/order/orderThunks";
 import OrderDetails from "./OrderDetails/OrderDetails";
-
 import OrderTable from "./OrderTable";
 import { handleDownloadOrderPDF } from "./pdf/pdfUtils";
 
@@ -36,10 +31,7 @@ const OrderHistoryPage = () => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState("today");
-  const [customDateRange, setCustomDateRange] = useState({
-    start: "",
-    end: "",
-  });
+  const [customDateRange, setCustomDateRange] = useState({ start: "", end: "" });
   const [showOrderDetailsDialog, setShowOrderDetailsDialog] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
@@ -71,7 +63,6 @@ const OrderHistoryPage = () => {
   // Filter orders
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      // Filter by search
       if (
         searchTerm &&
         !(
@@ -82,7 +73,6 @@ const OrderHistoryPage = () => {
         return false;
       }
 
-      // Filter by date
       const orderDate = new Date(order.createdAt);
       orderDate.setHours(0, 0, 0, 0);
 
@@ -138,6 +128,7 @@ const OrderHistoryPage = () => {
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header */}
       <div className="p-4 bg-card border-b flex justify-between items-center">
         <h1 className="text-2xl font-bold">Order History</h1>
         <Button
@@ -152,7 +143,8 @@ const OrderHistoryPage = () => {
         </Button>
       </div>
 
-      <div className="p-4 border-b">
+      {/* Filters */}
+      <div className="p-4 border-b bg-card">
         <div className="flex flex-wrap gap-4">
           <div className="flex-1 min-w-[300px]">
             <div className="relative">
@@ -233,6 +225,7 @@ const OrderHistoryPage = () => {
         )}
       </div>
 
+      {/* Orders Table */}
       <div className="flex-1 p-4 overflow-auto">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
@@ -260,24 +253,30 @@ const OrderHistoryPage = () => {
         onOpenChange={setShowOrderDetailsDialog}
       >
         {selectedOrder && (
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>Order Details - Invoice</DialogTitle>
-            </DialogHeader>
-            <OrderDetails selectedOrder={selectedOrder} />
-            <DialogFooter className="gap-2 sm:gap-0 space-x-3">
+          <DialogContent className="max-w-3xl w-full h-[90vh] flex flex-col p-0 overflow-hidden bg-card">
+            {/* Header */}
+            <div className="p-4 border-b bg-card">
+              <DialogHeader>
+                <DialogTitle>Order Details - Invoice</DialogTitle>
+              </DialogHeader>
+            </div>
+
+            {/* Scrollable Middle Content */}
+            <div className="flex-1 overflow-y-auto px-4 py-2">
+              <OrderDetails selectedOrder={selectedOrder} />
+            </div>
+
+            {/* Footer (Fixed Bottom) */}
+            <div className="p-4 border-t bg-card flex justify-end gap-3">
               <Button variant="outline" onClick={handleDownloadPDF}>
                 <Download className="h-4 w-4 mr-2" />
                 Download PDF
               </Button>
-              <Button
-                variant=""
-                onClick={() => handlePrintInvoice(selectedOrder)}
-              >
+              <Button onClick={() => handlePrintInvoice(selectedOrder)}>
                 <PrinterIcon className="h-4 w-4 mr-2" />
                 Print Invoice
               </Button>
-            </DialogFooter>
+            </div>
           </DialogContent>
         )}
       </Dialog>
